@@ -106,7 +106,7 @@ class LERFModel(NerfactoModel):
             clip_scales = clip_scales * ray_bundle.metadata["height"] * (dist / ray_bundle.metadata["fy"])
         else:
             clip_scales = torch.ones_like(lerf_samples.spacing_starts, device=self.device)
-
+            
         override_scales = (
             None if "override_scales" not in ray_bundle.metadata else ray_bundle.metadata["override_scales"]
         )

@@ -40,7 +40,13 @@ class DinoDataloader(FeatureDataloader):
             descriptors = descriptors.reshape(extractor.num_patches[0], extractor.num_patches[1], -1)
             dino_embeds.append(descriptors.cpu().detach())
 
+
         self.data = torch.stack(dino_embeds, dim=0)
+        data_shape = self.data.shape
+        #reduce it with pca
+        d= 64
+        _, _, v = torch.pca_lowrank(self.data.view(-1,data_shape[-1]),q=d)
+        self.data = torch.matmul(self.data.view(-1,data_shape[-1]), v).reshape(*data_shape[:-1],d)
 
     def __call__(self, img_points):
         # img_points: (B, 3) # (img_ind, x, y)
@@ -50,3 +56,9 @@ class DinoDataloader(FeatureDataloader):
         )
         x_ind, y_ind = (img_points[:, 1] * img_scale[0]).long(), (img_points[:, 2] * img_scale[1]).long()
         return (self.data[img_points[:, 0].long(), x_ind, y_ind]).to(self.device)
+
+    def get_full_img_feats(self, img_ind) -> torch.Tensor:
+        """
+        returns BxHxWxC
+        """
+        return self.data[img_ind].to(self.device)

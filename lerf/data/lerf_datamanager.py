@@ -38,8 +38,8 @@ from lerf.data.utils.dino_dataloader import DinoDataloader
 from lerf.data.utils.pyramid_embedding_dataloader import PyramidEmbeddingDataloader
 from lerf.encoders.image_encoder import BaseImageEncoder
 from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager, VanillaDataManagerConfig
-
-
+from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanager, FullImageDatamanagerConfig
+from nerfstudio.cameras.cameras import Cameras
 @dataclass
 class LERFDataManagerConfig(VanillaDataManagerConfig):
     _target: Type = field(default_factory=lambda: LERFDataManager)
@@ -47,7 +47,29 @@ class LERFDataManagerConfig(VanillaDataManagerConfig):
     patch_tile_size_res: int = 7
     patch_stride_scaler: float = 0.5
 
+@dataclass
+class DiGDataManagerConfig(FullImageDatamanagerConfig):
+    _target: Type = field(default_factory=lambda: DiGDataManager)
 
+class DiGDataManager(FullImageDatamanager):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        cache_dir = f"outputs/{self.config.dataparser.data.name}"
+        dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
+        images = [self.cached_train[i]["image"].permute(2, 0, 1)[None, ...] for i in range(len(self.train_dataset))]
+        images = torch.cat(images)
+        self.dino_dataloader = DinoDataloader(
+            image_list = images,
+            device = self.device,
+            cfg={"image_shape": list(images.shape[2:4])},
+            cache_path=dino_cache_path,
+        )
+
+    def next_train(self, step: int) -> Tuple[Cameras, Dict]:
+        camera, data = super().next_train(step)
+        data["dino"] = self.dino_dataloader.get_full_img_feats(camera.metadata["cam_idx"])
+        return camera, data
+    
 class LERFDataManager(VanillaDataManager):  # pylint: disable=abstract-method
     """Basic stored data manager implementation.
 

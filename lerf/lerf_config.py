@@ -9,10 +9,12 @@ from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConf
 from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.plugins.types import MethodSpecification
+from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
 
-from lerf.data.lerf_datamanager import LERFDataManagerConfig
+from lerf.data.lerf_datamanager import LERFDataManagerConfig, DiGDataManagerConfig
 from lerf.lerf import LERFModelConfig
 from lerf.lerf_pipeline import LERFPipelineConfig
+from lerf.dig import DiGModelConfig
 
 """
 Swap out the network config to use OpenCLIP or CLIP here.
@@ -42,7 +44,9 @@ lerf_method = MethodSpecification(
                 num_lerf_samples=24,
             ),
             network=OpenCLIPNetworkConfig(
-                clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512
+                clip_model_type="ViT-B-16",
+                clip_model_pretrained="laion2b_s34b_b88k",
+                clip_n_dims=512,
             ),
             #  You can swap the type of input encoder by specifying different NetworkConfigs, the one below uses OpenAI CLIP, the one above uses OpenCLIP
             # network=CLIPNetworkConfig(
@@ -56,11 +60,17 @@ lerf_method = MethodSpecification(
             },
             "fields": {
                 "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=30000),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=30000
+                ),
             },
             "lerf": {
-                "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-9),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=4000),
+                "optimizer": RAdamOptimizerConfig(
+                    lr=1e-2, eps=1e-15, weight_decay=1e-9
+                ),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=4000
+                ),
             },
             "camera_opt": {
                 "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
@@ -96,7 +106,9 @@ lerf_method_big = MethodSpecification(
                 num_lerf_samples=32,
             ),
             network=OpenCLIPNetworkConfig(
-                clip_model_type="ViT-L-14", clip_model_pretrained="laion2b_s32b_b82k", clip_n_dims=768
+                clip_model_type="ViT-L-14",
+                clip_model_pretrained="laion2b_s32b_b82k",
+                clip_n_dims=768,
             ),
         ),
         optimizers={
@@ -106,11 +118,17 @@ lerf_method_big = MethodSpecification(
             },
             "fields": {
                 "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=30000),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=30000
+                ),
             },
             "lerf": {
-                "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-9),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=3000),
+                "optimizer": RAdamOptimizerConfig(
+                    lr=1e-2, eps=1e-15, weight_decay=1e-9
+                ),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=3000
+                ),
             },
             "camera_opt": {
                 "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
@@ -146,7 +164,9 @@ lerf_method_lite = MethodSpecification(
                 num_lerf_samples=12,
             ),
             network=OpenCLIPNetworkConfig(
-                clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512
+                clip_model_type="ViT-B-16",
+                clip_model_pretrained="laion2b_s34b_b88k",
+                clip_n_dims=512,
             ),
         ),
         optimizers={
@@ -156,11 +176,17 @@ lerf_method_lite = MethodSpecification(
             },
             "fields": {
                 "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=30000),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=30000
+                ),
             },
             "lerf": {
-                "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-9),
-                "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=7000),
+                "optimizer": RAdamOptimizerConfig(
+                    lr=1e-2, eps=1e-15, weight_decay=1e-9
+                ),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3, max_steps=7000
+                ),
             },
             "camera_opt": {
                 "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
@@ -173,4 +199,58 @@ lerf_method_lite = MethodSpecification(
         vis="viewer",
     ),
     description="A lightweight version of LERF designed to work on smaller GPUs",
+)
+dig_method = MethodSpecification(
+    config=TrainerConfig(
+        method_name="dig",
+        steps_per_eval_batch=500,
+        steps_per_save=2000,
+        max_num_iterations=30000,
+        mixed_precision=False,
+        pipeline=VanillaPipelineConfig(
+            datamanager=DiGDataManagerConfig(
+                dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
+            ),
+            model=DiGModelConfig(),
+        ),
+        optimizers={
+            "means": {
+                "optimizer": AdamOptimizerConfig(lr=1.6e-4, eps=1e-15),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1.6e-6,
+                    max_steps=30000,
+                ),
+            },
+            "features_dc": {
+                "optimizer": AdamOptimizerConfig(lr=0.0025, eps=1e-15),
+                "scheduler": None,
+            },
+            "features_rest": {
+                "optimizer": AdamOptimizerConfig(lr=0.0025 / 20, eps=1e-15),
+                "scheduler": None,
+            },
+            "opacities": {
+                "optimizer": AdamOptimizerConfig(lr=0.05, eps=1e-15),
+                "scheduler": None,
+            },
+            "scales": {
+                "optimizer": AdamOptimizerConfig(lr=0.005, eps=1e-15),
+                "scheduler": None,
+            },
+            "quats": {
+                "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
+                "scheduler": None,
+            },
+            "dino_feats": {
+                "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-4,
+                    max_steps=30000,
+                ),
+            },
+        },
+        viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
+        vis="viewer",
+    ),
+    description="Base config for DiG",
 )

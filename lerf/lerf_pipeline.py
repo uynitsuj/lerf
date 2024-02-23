@@ -6,7 +6,6 @@ import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from nerfstudio.configs import base_config as cfg
 from nerfstudio.models.base_model import ModelConfig
 from nerfstudio.pipelines.base_pipeline import (
     VanillaPipeline,

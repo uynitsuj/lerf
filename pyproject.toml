@@ -19,3 +19,4 @@ include = ["lerf*"]
 lerf = 'lerf.lerf_config:lerf_method'
 lerf_big = 'lerf.lerf_config:lerf_method_big'
 lerf_lite = 'lerf.lerf_config:lerf_method_lite'
+dig = 'lerf.lerf_config:dig_method'
