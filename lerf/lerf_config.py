@@ -211,7 +211,7 @@ dig_method = MethodSpecification(
             datamanager=DiGDataManagerConfig(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
             ),
-            model=DiGModelConfig(),
+            model=DiGModelConfig()
         ),
         optimizers={
             "means": {
@@ -242,11 +242,8 @@ dig_method = MethodSpecification(
                 "scheduler": None,
             },
             "dino_feats": {
-                "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
-                "scheduler": ExponentialDecaySchedulerConfig(
-                    lr_final=1e-4,
-                    max_steps=30000,
-                ),
+                "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+                "scheduler": None
             },
         },
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),

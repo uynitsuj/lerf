@@ -4,8 +4,68 @@ import torch
 from lerf.data.utils.dino_extractor import ViTExtractor
 from lerf.data.utils.feature_dataloader import FeatureDataloader
 from tqdm import tqdm
+from torchvision import transforms
+from typing import Tuple
 
+def get_img_resolution(H, W, min_size = 840, p=14):
+    if H>W:
+        new_W = min_size
+        new_H = (int((H/W)*min_size)//p)*p
+    else:
+        new_H = min_size
+        new_W = (int((W/H)*min_size)//p)*p
+    return new_H, new_W
 
+class DinoV2DataLoader(FeatureDataloader):
+    model_type = "dinov2_vitb14"
+
+    def __init__(
+            self,
+            cfg: dict,
+            device: torch.device,
+            image_list: torch.Tensor,
+            cache_path: str = None,
+            pca_dim = 64
+    ):
+        assert "image_shape" in cfg
+        super().__init__(cfg, device, image_list, cache_path)
+        self.pca_dim = pca_dim
+        data_shape = self.data.shape
+        self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim)[2]
+        self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))
+        print("Dino data shape", self.data.shape)
+
+    def create(self, image_list):
+        self.model = torch.hub.load('facebookresearch/dinov2', self.model_type).cuda()
+        h,w = get_img_resolution(image_list.shape[2], image_list.shape[3])
+        preprocess = transforms.Compose([
+                        transforms.Resize((h,w),antialias=True, interpolation=transforms.InterpolationMode.BICUBIC),
+                        transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                    ])
+        preproc_image_lst = preprocess(image_list).to(self.device)
+        dino_embeds = []
+        for image in tqdm(preproc_image_lst, desc="dino", total=len(image_list), leave=False):
+            with torch.no_grad():
+                descriptors = self.model.get_intermediate_layers(image.unsqueeze(0),reshape=True)[0].squeeze().permute(1,2,0)
+            dino_embeds.append(descriptors.cpu().detach())
+
+        self.data = torch.stack(dino_embeds, dim=0)
+
+    def __call__(self, img_points):
+        # img_points: (B, 3) # (img_ind, x, y)
+        img_scale = (
+            self.data.shape[1] / self.cfg["image_shape"][0],
+            self.data.shape[2] / self.cfg["image_shape"][1],
+        )
+        x_ind, y_ind = (img_points[:, 1] * img_scale[0]).long(), (img_points[:, 2] * img_scale[1]).long()
+        return (self.data[img_points[:, 0].long(), x_ind, y_ind]).to(self.device)
+
+    def get_full_img_feats(self, img_ind) -> torch.Tensor:
+        """
+        returns BxHxWxC
+        """
+        return self.data[img_ind].to(self.device)
+    
 class DinoDataloader(FeatureDataloader):
     dino_model_type = "dino_vits8"
     dino_stride = 8

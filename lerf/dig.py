@@ -1,8 +1,8 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Type,Literal
+from dataclasses import field
+from typing import Dict, List, Type,Literal
 
 from torch.nn import Parameter
-from gsplat.sh import num_sh_bases, spherical_harmonics
+from gsplat.sh import spherical_harmonics
 
 from nerfstudio.viewer.viewer_elements import *
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
@@ -12,13 +12,15 @@ import math
 from nerfstudio.models.splatfacto import projection_matrix
 from nerfstudio.model_components import renderers
 from nerfstudio.viewer.viewer_elements import *
+from lerf.data.utils.dino_dataloader import get_img_resolution
 
+@dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
-    """blah"""
     dim: int = 64
     """dim of the thing"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
+    """thing"""
 
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
@@ -232,44 +234,48 @@ class DiGModel(SplatfactoModel):
         rgb = torch.clamp(rgb, max=1.0)  # type: ignore
         
         dino_feats = None
-        if self.step>-1:
-            DINO_BLOCK = 16
-            downscale = 1.0 if not self.training else (111/W)*2 #84 for bouquet
-            with torch.no_grad():
-                dino_xys, dino_depths, dino_radii, dino_conics, _, dino_num_tiles_hit, _ = project_gaussians(  # type: ignore
-                    means_crop,
-                    torch.exp(scales_crop),
-                    1,
-                    quats_crop / quats_crop.norm(dim=-1, keepdim=True),
-                    viewmat.squeeze()[:3, :],
-                    projmat.squeeze() @ viewmat.squeeze(),
-                    camera.fx.item()*downscale,
-                    camera.fy.item()*downscale,
-                    cx*downscale,
-                    cy*downscale,
-                    int(H*downscale),
-                    int(W*downscale),
-                    DINO_BLOCK,
-                )  # type: ignore
-            if crop_ids is not None:
-                gauss_crops = self.gauss_params['dino_feats'][crop_ids]
-            else:
-                gauss_crops = self.gauss_params['dino_feats']
-            dino_feats,dino_alpha = rasterize_gaussians(  # type: ignore
-                    dino_xys,
-                    dino_depths,
-                    dino_radii,
-                    dino_conics,
-                    dino_num_tiles_hit,  # type: ignore
-                    gauss_crops,
-                    opacities.detach(),
-                    int(H*downscale),
-                    int(W*downscale),
-                    DINO_BLOCK,
-                    background=torch.zeros(self.config.dim, device=self.device),
-                    return_alpha=True,
-                )  # type: ignore
-            dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.dim, device=self.device))
+        DINO_BLOCK = 10
+        downscale = 1.0 if not self.training else (840/min(H,W))/14
+        h,w = get_img_resolution(H, W)
+        if self.training:
+            dino_h,dino_w = h//14,w//14
+        else:
+            dino_h,dino_w = H,W
+        with torch.no_grad():
+            dino_xys, dino_depths, dino_radii, dino_conics, _, dino_num_tiles_hit, _ = project_gaussians(  # type: ignore
+                means_crop,
+                torch.exp(scales_crop),
+                1,
+                quats_crop / quats_crop.norm(dim=-1, keepdim=True),
+                viewmat.squeeze()[:3, :],
+                projmat.squeeze() @ viewmat.squeeze(),
+                camera.fx.item()*downscale,
+                camera.fy.item()*downscale,
+                cx*downscale,
+                cy*downscale,
+                dino_h,
+                dino_w,
+                DINO_BLOCK,
+            )  # type: ignore
+        if crop_ids is not None:
+            gauss_crops = self.gauss_params['dino_feats'][crop_ids]
+        else:
+            gauss_crops = self.gauss_params['dino_feats']
+        dino_feats,dino_alpha = rasterize_gaussians(  # type: ignore
+                dino_xys,
+                dino_depths,
+                dino_radii,
+                dino_conics,
+                dino_num_tiles_hit,  # type: ignore
+                gauss_crops,
+                opacities.detach(),
+                dino_h,
+                dino_w,
+                DINO_BLOCK,
+                background=torch.zeros(self.config.dim, device=self.device),
+                return_alpha=True,
+            )  # type: ignore
+        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.dim, device=self.device))
         depth_im = None
         if self.config.output_depth_during_training or not self.training:
             depth_im = rasterize_gaussians(  # type: ignore
@@ -292,14 +298,22 @@ class DiGModel(SplatfactoModel):
             #compute similarity to click_feat across dino feats
             sim = (dino_feats - self.click_feat).pow(2).sum(dim=-1).sqrt()[...,None]
             out['click_similarity'] = sim
-            print("Click sim: ",sim.mean().item(),sim.max().item(),sim.min().item())
         return out   # type: ignore
     
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
         if outputs['dino'] is not None:
             #resize the output dino feats by a factor of 2
-            import torchvision
-            gt = torchvision.transforms.Resize((batch['dino'].shape[0]*2,batch['dino'].shape[1]*2))(batch['dino'].permute(2,0,1)).permute(1,2,0)
+            # import torchvision
+            # gt = torchvision.transforms.Resize((batch['dino'].shape[0]*2,batch['dino'].shape[1]*2))(batch['dino'].permute(2,0,1)).permute(1,2,0)
+            gt = batch['dino']
             loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
+            if self.step == 0 or self.num_points != self.nearest_ids.shape[0]:
+                from cuml.neighbors import NearestNeighbors
+                model = NearestNeighbors(n_neighbors=3)
+                means = self.means.detach().cpu().numpy()
+                model.fit(means)
+                _, self.nearest_ids = model.kneighbors(means)
+            # encourage the nearest neighbors to have similar dino feats
+            loss_dict['dino_nn_loss'] = 10 * self.gauss_params['dino_feats'][self.nearest_ids].std(dim=1).mean()
         return loss_dict
