@@ -17,7 +17,7 @@ def get_img_resolution(H, W, min_size = 840, p=14):
     return new_H, new_W
 
 class DinoV2DataLoader(FeatureDataloader):
-    model_type = "dinov2_vitb14"
+    model_type = "dinov2_vits14"
 
     def __init__(
             self,
@@ -31,8 +31,9 @@ class DinoV2DataLoader(FeatureDataloader):
         super().__init__(cfg, device, image_list, cache_path)
         self.pca_dim = pca_dim
         data_shape = self.data.shape
-        self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim)[2]
-        self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))
+        if self.pca_dim != self.data.shape[-1]:
+            self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim)[2]
+            self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))
         print("Dino data shape", self.data.shape)
 
     def create(self, image_list):

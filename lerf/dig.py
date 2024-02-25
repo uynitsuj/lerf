@@ -20,7 +20,6 @@ class DiGModelConfig(SplatfactoModelConfig):
     dim: int = 64
     """dim of the thing"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
-    """thing"""
 
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
@@ -294,7 +293,7 @@ class DiGModel(SplatfactoModel):
             depth_im = torch.where(alpha > 0, depth_im / alpha, depth_im.detach().max())
         
         out = {"rgb": rgb, "depth": depth_im, "accumulation": alpha, "background": background,'dino':dino_feats}
-        if hasattr(self,'click_feat') and not self.training:
+        if hasattr(self,'click_feat') and not self.training and dino_feats is not None:
             #compute similarity to click_feat across dino feats
             sim = (dino_feats - self.click_feat).pow(2).sum(dim=-1).sqrt()[...,None]
             out['click_similarity'] = sim
@@ -303,12 +302,9 @@ class DiGModel(SplatfactoModel):
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
         if outputs['dino'] is not None:
-            #resize the output dino feats by a factor of 2
-            # import torchvision
-            # gt = torchvision.transforms.Resize((batch['dino'].shape[0]*2,batch['dino'].shape[1]*2))(batch['dino'].permute(2,0,1)).permute(1,2,0)
             gt = batch['dino']
             loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
-            if self.step == 0 or self.num_points != self.nearest_ids.shape[0]:
+            if not hasattr(self,'nearest_ids') or self.num_points != self.nearest_ids.shape[0]:
                 from cuml.neighbors import NearestNeighbors
                 model = NearestNeighbors(n_neighbors=3)
                 means = self.means.detach().cpu().numpy()
