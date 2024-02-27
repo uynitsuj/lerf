@@ -58,7 +58,7 @@ class DiGDataManager(FullImageDatamanager):
         dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
         images = [self.cached_train[i]["image"].permute(2, 0, 1)[None, ...] for i in range(len(self.train_dataset))]
         images = torch.cat(images)
-        self.dino_dataloader = DinoV2DataLoader(
+        self.dino_dataloader = DinoDataloader(
             image_list = images,
             device = self.device,
             cfg={"image_shape": list(images.shape[2:4])},

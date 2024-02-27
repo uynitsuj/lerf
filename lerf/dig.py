@@ -13,6 +13,7 @@ from nerfstudio.models.splatfacto import projection_matrix
 from nerfstudio.model_components import renderers
 from nerfstudio.viewer.viewer_elements import *
 from lerf.data.utils.dino_dataloader import get_img_resolution
+from torchvision.transforms.functional import resize
 
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
@@ -20,6 +21,10 @@ class DiGModelConfig(SplatfactoModelConfig):
     dim: int = 64
     """dim of the thing"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
+    dino_rescale_factor: int = 4
+    """
+    How much to upscale rendered dino for supervision
+    """
 
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
@@ -233,11 +238,12 @@ class DiGModel(SplatfactoModel):
         rgb = torch.clamp(rgb, max=1.0)  # type: ignore
         
         dino_feats = None
-        DINO_BLOCK = 10
-        downscale = 1.0 if not self.training else (840/min(H,W))/14
+        DINO_BLOCK = 8
+        p_size = 8
+        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*800/max(H,W))/p_size
         h,w = get_img_resolution(H, W)
         if self.training:
-            dino_h,dino_w = h//14,w//14
+            dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
         else:
             dino_h,dino_w = H,W
         with torch.no_grad():
@@ -303,6 +309,7 @@ class DiGModel(SplatfactoModel):
         loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
         if outputs['dino'] is not None:
             gt = batch['dino']
+            gt = resize(gt.permute(2,0,1), (outputs['dino'].shape[0],outputs['dino'].shape[1])).permute(1,2,0)
             loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
             if not hasattr(self,'nearest_ids') or self.num_points != self.nearest_ids.shape[0]:
                 from cuml.neighbors import NearestNeighbors
@@ -311,5 +318,5 @@ class DiGModel(SplatfactoModel):
                 model.fit(means)
                 _, self.nearest_ids = model.kneighbors(means)
             # encourage the nearest neighbors to have similar dino feats
-            loss_dict['dino_nn_loss'] = 10 * self.gauss_params['dino_feats'][self.nearest_ids].std(dim=1).mean()
+            loss_dict['dino_nn_loss'] = 20 * self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).mean()
         return loss_dict
