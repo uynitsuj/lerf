@@ -18,10 +18,10 @@ from torchvision.transforms.functional import resize
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
-    dim: int = 64
+    dim: int = 128
     """dim of the thing"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
-    dino_rescale_factor: int = 4
+    dino_rescale_factor: int = 2
     """
     How much to upscale rendered dino for supervision
     """
@@ -239,8 +239,8 @@ class DiGModel(SplatfactoModel):
         
         dino_feats = None
         DINO_BLOCK = 8
-        p_size = 8
-        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*800/max(H,W))/p_size
+        p_size = 7
+        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*840/max(H,W))/p_size
         h,w = get_img_resolution(H, W)
         if self.training:
             dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)

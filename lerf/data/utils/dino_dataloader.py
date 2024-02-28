@@ -8,7 +8,7 @@ from torchvision import transforms
 from typing import Tuple
 import numpy as np
 
-def get_img_resolution(H, W, max_size = 800, p=8):
+def get_img_resolution(H, W, max_size = 840, p=14):
     if H<W:
         new_W = max_size
         new_H = (int((H/W)*max_size)//p)*p
@@ -81,9 +81,9 @@ class DinoV2DataLoader(FeatureDataloader):
         return self.data[img_ind].to(self.device)
     
 class DinoDataloader(FeatureDataloader):
-    dino_model_type = "dino_vits8"
     # dino_model_type = "dino_vits8"
-    dino_stride = 8
+    dino_model_type = "dinov2_vits14"
+    dino_stride = 7
     dino_layer = 11
     dino_facet = "key"
     dino_bin = False
@@ -94,7 +94,7 @@ class DinoDataloader(FeatureDataloader):
         device: torch.device,
         image_list: torch.Tensor,
         cache_path: str = None,
-        pca_dim: int = 64
+        pca_dim: int = 128
     ):
         assert "image_shape" in cfg
         self.extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
