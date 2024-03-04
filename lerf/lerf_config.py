@@ -16,6 +16,7 @@ from lerf.lerf import LERFModelConfig
 from lerf.lerf_pipeline import LERFPipelineConfig
 from lerf.dig import DiGModelConfig
 
+from garfield.garfield_gaussian_pipeline import GarfieldGaussianPipelineConfig
 """
 Swap out the network config to use OpenCLIP or CLIP here.
 """
@@ -31,7 +32,7 @@ lerf_method = MethodSpecification(
         mixed_precision=True,
         pipeline=LERFPipelineConfig(
             datamanager=LERFDataManagerConfig(
-                dataparser=NerfstudioDataParserConfig(train_split_fraction=0.99),
+                dataparser=NerfstudioDataParserConfig(train_split_fraction=0.3),
                 train_num_rays_per_batch=4096,
                 eval_num_rays_per_batch=4096,
             ),
@@ -207,11 +208,13 @@ dig_method = MethodSpecification(
         steps_per_save=2000,
         max_num_iterations=30000,
         mixed_precision=False,
-        pipeline=VanillaPipelineConfig(
+        pipeline=GarfieldGaussianPipelineConfig(#use this for overlaying dino on top of a garfield trained model
+        # pipeline=VanillaPipelineConfig(#use this for JUST training DINO
+            # garfield_ckpt = Path("outputs/colorful_mugs_colmap/garfield/2024-02-29_155234/config.yml")
             datamanager=DiGDataManagerConfig(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
             ),
-            model=DiGModelConfig()
+            model=DiGModelConfig(),
         ),
         optimizers={
             "means": {

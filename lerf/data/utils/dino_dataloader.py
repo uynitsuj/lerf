@@ -81,9 +81,8 @@ class DinoV2DataLoader(FeatureDataloader):
         return self.data[img_ind].to(self.device)
     
 class DinoDataloader(FeatureDataloader):
-    # dino_model_type = "dino_vits8"
-    dino_model_type = "dinov2_vits14"
-    dino_stride = 7
+    dino_model_type = "dinov2_vitb14"
+    dino_stride = 14
     dino_layer = 11
     dino_facet = "key"
     dino_bin = False
@@ -94,7 +93,7 @@ class DinoDataloader(FeatureDataloader):
         device: torch.device,
         image_list: torch.Tensor,
         cache_path: str = None,
-        pca_dim: int = 128
+        pca_dim: int = 64
     ):
         assert "image_shape" in cfg
         self.extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
@@ -106,7 +105,7 @@ class DinoDataloader(FeatureDataloader):
         self.data = self.get_dino_feats(image_list)
         data_shape = self.data.shape
         if self.pca_dim != self.data.shape[-1]:
-            self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim)[2]
+            self.pca_matrix = torch.pca_lowrank(self.data.view(-1, data_shape[-1]), q=self.pca_dim,niter=20)[2]
             self.data = torch.matmul(self.data.view(-1, data_shape[-1]), self.pca_matrix).reshape((*data_shape[:-1], self.pca_dim))
         else:
             self.pca_matrix = torch.eye(data_shape[-1])
