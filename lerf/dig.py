@@ -280,8 +280,9 @@ class DiGModel(SplatfactoModel):
                 background=torch.zeros(self.config.dim, device=self.device),
                 return_alpha=True,
             )  # type: ignore
-        if self.training:
-            dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.dim, device=self.device))
+        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.dim, device=self.device))
+        if not self.training:
+            dino_feats[dino_alpha < 0.8] = 0
         depth_im = None
         if self.config.output_depth_during_training or not self.training:
             depth_im = rasterize_gaussians(  # type: ignore
@@ -299,7 +300,7 @@ class DiGModel(SplatfactoModel):
             )[..., 0:1]  # type: ignore
             depth_im = torch.where(alpha > 0, depth_im / alpha, depth_im.detach().max())
         
-        out = {"rgb": rgb, "depth": depth_im, "accumulation": alpha, "background": background,'dino':dino_feats,'dino_alpha':dino_alpha}
+        out = {"rgb": rgb, "depth": depth_im, "accumulation": alpha, "background": background,'dino':dino_feats,'dino_alpha':dino_alpha[..., None]}
         if hasattr(self,'click_feat') and not self.training and dino_feats is not None:
             #compute similarity to click_feat across dino feats
             sim = (dino_feats - self.click_feat).pow(2).sum(dim=-1).sqrt()[...,None]
