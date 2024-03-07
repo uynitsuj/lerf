@@ -14,16 +14,22 @@ from nerfstudio.model_components import renderers
 from nerfstudio.viewer.viewer_elements import *
 from lerf.data.utils.dino_dataloader import get_img_resolution
 from torchvision.transforms.functional import resize
+import tinycudann as tcnn
 
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
-    dim: int = 64
-    """dim of the thing"""
+    dim: int = 128
+    """Output dimension of the feature rendering"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
     dino_rescale_factor: int = 4
     """
     How much to upscale rendered dino for supervision
+    """
+    num_downscales: int = 0
+    gaussian_dim = 64
+    """
+    Dimension the gaussians actually store as features
     """
 
 class DiGModel(SplatfactoModel):
@@ -31,12 +37,23 @@ class DiGModel(SplatfactoModel):
 
     def populate_modules(self):
         super().populate_modules()
-        self.gauss_params['dino_feats'] = torch.nn.Parameter(torch.randn((self.num_points, self.config.dim)))
+        self.gauss_params['dino_feats'] = torch.nn.Parameter(torch.randn((self.num_points, self.config.gaussian_dim)))
         torch.inverse(torch.ones((1, 1), device="cuda:0"))# https://github.com/pytorch/pytorch/issues/90613
         self.viewer_control = ViewerControl()
         self.click_gaussian = ViewerButton(name="Click Gaussian", cb_hook=self._click_gaussian)
         self.click_location = None
         self.click_handle = None
+        self.nn = tcnn.Network(
+            n_input_dims=self.config.gaussian_dim,
+            n_output_dims=self.config.dim,
+            network_config={
+                "otype": "FullyFusedMLP",
+                "activation": "ReLU",
+                "output_activation": "None",
+                "n_neurons": 64,
+                "n_hidden_layers": 2,
+            },
+        )
 
     def _click_gaussian(self, button: ViewerButton):
         """Start listening for click-based 3D point specification.
@@ -89,6 +106,11 @@ class DiGModel(SplatfactoModel):
         params = super().get_gaussian_param_groups()
         params['dino_feats'] = [self.gauss_params['dino_feats']]
         return params
+    
+    def get_param_groups(self) -> Dict[str, List[Parameter]]:
+        gps = super().get_param_groups()
+        gps['nn_projection'] = list(self.nn.parameters())
+        return gps
     
     def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
@@ -277,10 +299,11 @@ class DiGModel(SplatfactoModel):
                 dino_h,
                 dino_w,
                 DINO_BLOCK,
-                background=torch.zeros(self.config.dim, device=self.device),
+                background=torch.zeros(self.config.gaussian_dim, device=self.device),
                 return_alpha=True,
             )  # type: ignore
-        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.dim, device=self.device))
+        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
+        dino_feats = self.nn(dino_feats.view(-1,self.config.gaussian_dim).half()).float().view(dino_h,dino_w,-1)
         if not self.training:
             dino_feats[dino_alpha < 0.8] = 0
         depth_im = None
@@ -312,7 +335,7 @@ class DiGModel(SplatfactoModel):
         if outputs['dino'] is not None:
             gt = batch['dino']
             gt = resize(gt.permute(2,0,1), (outputs['dino'].shape[0],outputs['dino'].shape[1])).permute(1,2,0)
-            loss_dict['dino_loss'] = torch.nn.functional.huber_loss(outputs['dino'],gt)
+            loss_dict['dino_loss'] = torch.nn.functional.mse_loss(outputs['dino'],gt)
             if not hasattr(self,'nearest_ids') or self.num_points != self.nearest_ids.shape[0]:
                 from cuml.neighbors import NearestNeighbors
                 model = NearestNeighbors(n_neighbors=3)
@@ -320,5 +343,6 @@ class DiGModel(SplatfactoModel):
                 model.fit(means)
                 _, self.nearest_ids = model.kneighbors(means)
             # encourage the nearest neighbors to have similar dino feats
-            loss_dict['dino_nn_loss'] = 20 * self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).mean()
+            if self.step>1000:
+                loss_dict['dino_nn_loss'] = .01*self.gauss_params['dino_feats'][self.nearest_ids].var(dim=1).sum()
         return loss_dict
