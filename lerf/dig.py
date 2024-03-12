@@ -27,11 +27,11 @@ class DiGModelConfig(SplatfactoModelConfig):
     How much to upscale rendered dino for supervision
     """
     num_downscales: int = 0
-    gaussian_dim = 64
-    """
-    Dimension the gaussians actually store as features
-    """
-
+    gaussian_dim:int = 64
+    """Dimension the gaussians actually store as features"""
+    # img_embed_dim: int = 16
+    # use_appearance_embed: bool = False
+    # """Whether to use an appearance embedding for the dino features"""
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
 
@@ -51,9 +51,10 @@ class DiGModel(SplatfactoModel):
                 "activation": "ReLU",
                 "output_activation": "None",
                 "n_neurons": 64,
-                "n_hidden_layers": 2,
+                "n_hidden_layers": 3,
             },
         )
+        # self.img_embed = torch.nn.Embedding(self.num_train_data, self.config.img_embed_dim)
 
     def _click_gaussian(self, button: ViewerButton):
         """Start listening for click-based 3D point specification.
@@ -303,7 +304,14 @@ class DiGModel(SplatfactoModel):
                 return_alpha=True,
             )  # type: ignore
         dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
-        dino_feats = self.nn(dino_feats.view(-1,self.config.gaussian_dim).half()).float().view(dino_h,dino_w,-1)
+        # if self.config.use_appearance_embed and camera.metadata is not None and "cam_idx" in camera.metadata:
+        #     cam_id = camera.metadata["cam_idx"]
+        #     embed = self.img_embed(torch.tensor(cam_id,device=self.device)).repeat(dino_h*dino_w,1)
+        # else:
+        #     embed = torch.zeros(self.config.img_embed_dim,device=self.device).repeat(dino_h*dino_w,1)
+        # nn_inputs = torch.cat([dino_feats.view(-1,self.config.gaussian_dim),embed],dim=-1)
+        nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
+        dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
         if not self.training:
             dino_feats[dino_alpha < 0.8] = 0
         depth_im = None

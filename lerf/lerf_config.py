@@ -201,6 +201,7 @@ lerf_method_lite = MethodSpecification(
     ),
     description="A lightweight version of LERF designed to work on smaller GPUs",
 )
+from pathlib import Path
 dig_method = MethodSpecification(
     config=TrainerConfig(
         method_name="dig",
@@ -214,6 +215,7 @@ dig_method = MethodSpecification(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
             ),
             model=DiGModelConfig(),
+            # garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
         ),
         optimizers={
             "means": {
@@ -245,11 +247,17 @@ dig_method = MethodSpecification(
             },
             "dino_feats": {
                 "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
-                "scheduler": None
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3,
+                    max_steps=6000,
+                ),
             },
             "nn_projection": {
                 "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
-                "scheduler": None
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-3,
+                    max_steps=6000,
+                ),
             },
         },
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
