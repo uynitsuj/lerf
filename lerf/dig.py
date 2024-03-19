@@ -15,23 +15,20 @@ from nerfstudio.viewer.viewer_elements import *
 from lerf.data.utils.dino_dataloader import get_img_resolution
 from torchvision.transforms.functional import resize
 import tinycudann as tcnn
-
+import contextlib
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
     dim: int = 128
     """Output dimension of the feature rendering"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
-    dino_rescale_factor: int = 4
+    dino_rescale_factor: int = 2
     """
     How much to upscale rendered dino for supervision
     """
     num_downscales: int = 0
     gaussian_dim:int = 64
     """Dimension the gaussians actually store as features"""
-    # img_embed_dim: int = 16
-    # use_appearance_embed: bool = False
-    # """Whether to use an appearance embedding for the dino features"""
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
 
@@ -54,7 +51,6 @@ class DiGModel(SplatfactoModel):
                 "n_hidden_layers": 3,
             },
         )
-        # self.img_embed = torch.nn.Embedding(self.num_train_data, self.config.img_embed_dim)
 
     def _click_gaussian(self, button: ViewerButton):
         """Start listening for click-based 3D point specification.
@@ -262,14 +258,16 @@ class DiGModel(SplatfactoModel):
         
         dino_feats = None
         DINO_BLOCK = 8
-        p_size = 14
+        p_size = 7
         downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*840/max(H,W))/p_size
         h,w = get_img_resolution(H, W)
         if self.training:
             dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
         else:
             dino_h,dino_w = H,W
-        with torch.no_grad():
+        grad_ctx = torch.no_grad if self.training else contextlib.nullcontext
+        # turn on gradients for this in eval() mode for pose optimization
+        with grad_ctx():
             dino_xys, dino_depths, dino_radii, dino_conics, _, dino_num_tiles_hit, _ = project_gaussians(  # type: ignore
                 means_crop,
                 torch.exp(scales_crop),
@@ -304,12 +302,6 @@ class DiGModel(SplatfactoModel):
                 return_alpha=True,
             )  # type: ignore
         dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
-        # if self.config.use_appearance_embed and camera.metadata is not None and "cam_idx" in camera.metadata:
-        #     cam_id = camera.metadata["cam_idx"]
-        #     embed = self.img_embed(torch.tensor(cam_id,device=self.device)).repeat(dino_h*dino_w,1)
-        # else:
-        #     embed = torch.zeros(self.config.img_embed_dim,device=self.device).repeat(dino_h*dino_w,1)
-        # nn_inputs = torch.cat([dino_feats.view(-1,self.config.gaussian_dim),embed],dim=-1)
         nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
         dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
         if not self.training:

@@ -60,7 +60,7 @@ lerf_method = MethodSpecification(
                 "scheduler": None,
             },
             "fields": {
-                "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+                "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
                 "scheduler": ExponentialDecaySchedulerConfig(
                     lr_final=1e-3, max_steps=30000
                 ),
@@ -209,13 +209,14 @@ dig_method = MethodSpecification(
         steps_per_save=2000,
         max_num_iterations=30000,
         mixed_precision=False,
-        # pipeline=GarfieldGaussianPipelineConfig(#use this for overlaying dino on top of a garfield trained model
-        pipeline=VanillaPipelineConfig(#use this for JUST training DINO
+        pipeline=GarfieldGaussianPipelineConfig(#use this for overlaying dino on top of a garfield trained model
+        # pipeline=VanillaPipelineConfig(#use this for JUST training DINO
             datamanager=DiGDataManagerConfig(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
             ),
             model=DiGModelConfig(),
-            # garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            # garfield_ckpt = Path("outputs/nerfgun2/garfield/2024-03-13_140635/config.yml")
         ),
         optimizers={
             "means": {

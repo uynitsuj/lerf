@@ -88,7 +88,6 @@ class DinoV2DataLoader(FeatureDataloader):
         returns BxHxWxC
         """
         return self.data[img_ind].to(self.device)
-    
 class DinoDataloader(FeatureDataloader):
     dino_model_type = "dinov2_vitb14"
     dino_stride = 7
