@@ -90,7 +90,7 @@ class DinoV2DataLoader(FeatureDataloader):
         return self.data[img_ind].to(self.device)
 class DinoDataloader(FeatureDataloader):
     dino_model_type = "dinov2_vitb14"
-    dino_stride = 7
+    dino_stride = 14
     dino_layer = 11
     dino_facet = "key"
     dino_bin = False
@@ -101,7 +101,7 @@ class DinoDataloader(FeatureDataloader):
         device: torch.device,
         image_list: torch.Tensor,
         cache_path: str = None,
-        pca_dim: int = 128,
+        pca_dim: int = 64,
         use_denoiser: bool = True,
     ):
         assert "image_shape" in cfg
@@ -173,7 +173,7 @@ class DinoDataloader(FeatureDataloader):
             cache_pca_path = self.cache_path.parent / ("pca.npy")
         np.save(cache_pca_path, self.pca_matrix.cpu().numpy())
 
-    def get_dino_feats(self,image_list):
+    def get_dino_feats(self,image_list, keep_cuda=False):
         h,w = get_img_resolution(image_list.shape[2], image_list.shape[3])
         preprocess = transforms.Compose([
                         transforms.Resize((h,w),antialias=True, interpolation=transforms.InterpolationMode.BICUBIC),
@@ -191,7 +191,10 @@ class DinoDataloader(FeatureDataloader):
                     output_dict = self.denoise_model(image.to(self.device), return_dict=True)
                     denoised_features = output_dict["pred_denoised_feats"].squeeze(0)
                     denoised_features/=10
-                    dino_embeds.append(denoised_features.cpu().detach())
+                    if keep_cuda:
+                        dino_embeds.append(denoised_features)
+                    else:
+                        dino_embeds.append(denoised_features.cpu().detach())
                     
                 else:
                     descriptors = self.extractor.extract_descriptors(
@@ -201,14 +204,17 @@ class DinoDataloader(FeatureDataloader):
                     self.dino_bin, 
                     )             
                     descriptors = descriptors.reshape(self.extractor.num_patches[0], self.extractor.num_patches[1], -1)
-                    dino_embeds.append(descriptors.cpu().detach())
+                    if keep_cuda:
+                        dino_embeds.append(descriptors)
+                    else:
+                        dino_embeds.append(descriptors.cpu().detach())
                 
          
                 
         return torch.stack(dino_embeds, dim=0)
     
-    def get_pca_feats(self,image_list):
-        feats = self.get_dino_feats(image_list)
+    def get_pca_feats(self,image_list, keep_cuda = False):
+        feats = self.get_dino_feats(image_list, keep_cuda=keep_cuda)
         data_shape = feats.shape
         pca_feats = torch.matmul(feats.view(-1, data_shape[-1]), self.pca_matrix.to(feats)).reshape((*data_shape[:-1], self.pca_dim))
         return pca_feats

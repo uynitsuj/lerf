@@ -216,6 +216,7 @@ dig_method = MethodSpecification(
             ),
             model=DiGModelConfig(),
             garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            # garfield_ckpt = Path("outputs/boops_mug/garfield/2024-03-18_180854/config.yml")
             # garfield_ckpt = Path("outputs/nerfgun2/garfield/2024-03-13_140635/config.yml")
         ),
         optimizers={

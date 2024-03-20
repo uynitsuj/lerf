@@ -16,10 +16,11 @@ from lerf.data.utils.dino_dataloader import get_img_resolution
 from torchvision.transforms.functional import resize
 import tinycudann as tcnn
 import contextlib
+from collections import OrderedDict
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
-    dim: int = 128
+    dim: int = 64
     """Output dimension of the feature rendering"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
     dino_rescale_factor: int = 2
@@ -27,7 +28,7 @@ class DiGModelConfig(SplatfactoModelConfig):
     How much to upscale rendered dino for supervision
     """
     num_downscales: int = 0
-    gaussian_dim:int = 64
+    gaussian_dim:int = 48
     """Dimension the gaussians actually store as features"""
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
@@ -51,6 +52,16 @@ class DiGModel(SplatfactoModel):
                 "n_hidden_layers": 3,
             },
         )
+    def load_state_dict(self, dict, **kwargs):  # type: ignore
+        super().load_state_dict(dict, **kwargs)
+        # here we need to do some hacky stuff....
+        # Convert gauss_params from ParameterDict to a simple OrderedDict of Tensors
+        # This is critical for allowing backprop through the gauss_params
+        newdict = OrderedDict()
+        for k, v in self.gauss_params.items():
+            newdict[k] = torch.Tensor(v)
+        del self.gauss_params
+        self.gauss_params = newdict
 
     def _click_gaussian(self, button: ViewerButton):
         """Start listening for click-based 3D point specification.
@@ -258,7 +269,7 @@ class DiGModel(SplatfactoModel):
         
         dino_feats = None
         DINO_BLOCK = 8
-        p_size = 7
+        p_size = 14
         downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*840/max(H,W))/p_size
         h,w = get_img_resolution(H, W)
         if self.training:
