@@ -207,7 +207,7 @@ dig_method = MethodSpecification(
         method_name="dig",
         steps_per_eval_batch=500,
         steps_per_save=2000,
-        max_num_iterations=30000,
+        max_num_iterations=6000,
         mixed_precision=False,
         pipeline=GarfieldGaussianPipelineConfig(#use this for overlaying dino on top of a garfield trained model
         # pipeline=VanillaPipelineConfig(#use this for JUST training DINO
@@ -216,6 +216,8 @@ dig_method = MethodSpecification(
             ),
             model=DiGModelConfig(),
             garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            # garfield_ckpt = Path("outputs/table_scan/garfield/2024-03-21_120025/config.yml")
+            # garfield_ckpt = Path("outputs/tissue_scan/garfield/2024-03-21_135147/config.yml")
             # garfield_ckpt = Path("outputs/boops_mug/garfield/2024-03-18_180854/config.yml")
             # garfield_ckpt = Path("outputs/nerfgun2/garfield/2024-03-13_140635/config.yml")
         ),

@@ -9,7 +9,6 @@ from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from gsplat.project_gaussians import project_gaussians
 from gsplat.rasterize import rasterize_gaussians
 import math
-from nerfstudio.models.splatfacto import projection_matrix
 from nerfstudio.model_components import renderers
 from nerfstudio.viewer.viewer_elements import *
 from lerf.data.utils.dino_dataloader import get_img_resolution
@@ -23,7 +22,7 @@ class DiGModelConfig(SplatfactoModelConfig):
     dim: int = 64
     """Output dimension of the feature rendering"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
-    dino_rescale_factor: int = 2
+    dino_rescale_factor: int = 3
     """
     How much to upscale rendered dino for supervision
     """
@@ -177,11 +176,8 @@ class DiGModel(SplatfactoModel):
         # calculate the FOV of the camera given fx and fy, width and height
         cx = camera.cx.item()
         cy = camera.cy.item()
-        fovx = 2 * math.atan(camera.width / (2 * camera.fx))
-        fovy = 2 * math.atan(camera.height / (2 * camera.fy))
         W, H = int(camera.width.item()), int(camera.height.item())
         self.last_size = (H, W)
-        projmat = projection_matrix(0.001, 1000, fovx, fovy, device=self.device)
 
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
@@ -206,7 +202,6 @@ class DiGModel(SplatfactoModel):
             1,
             quats_crop / quats_crop.norm(dim=-1, keepdim=True),
             viewmat.squeeze()[:3, :],
-            projmat.squeeze() @ viewmat.squeeze(),
             camera.fx.item(),
             camera.fy.item(),
             cx,
@@ -268,9 +263,9 @@ class DiGModel(SplatfactoModel):
         rgb = torch.clamp(rgb, max=1.0)  # type: ignore
         
         dino_feats = None
-        DINO_BLOCK = 8
+        DINO_BLOCK = 14
         p_size = 14
-        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*840/max(H,W))/p_size
+        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1260/max(H,W))/p_size
         h,w = get_img_resolution(H, W)
         if self.training:
             dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
@@ -285,7 +280,6 @@ class DiGModel(SplatfactoModel):
                 1,
                 quats_crop / quats_crop.norm(dim=-1, keepdim=True),
                 viewmat.squeeze()[:3, :],
-                projmat.squeeze() @ viewmat.squeeze(),
                 camera.fx.item()*downscale,
                 camera.fy.item()*downscale,
                 cx*downscale,
