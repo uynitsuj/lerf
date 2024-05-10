@@ -29,6 +29,7 @@ class DiGModelConfig(SplatfactoModelConfig):
     num_downscales: int = 0
     gaussian_dim:int = 48
     """Dimension the gaussians actually store as features"""
+
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
 
@@ -48,7 +49,7 @@ class DiGModel(SplatfactoModel):
                 "activation": "ReLU",
                 "output_activation": "None",
                 "n_neurons": 64,
-                "n_hidden_layers": 3,
+                "n_hidden_layers": 2,
             },
         )
     def load_state_dict(self, dict, **kwargs):  # type: ignore
