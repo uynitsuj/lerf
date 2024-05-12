@@ -32,16 +32,15 @@ class Zed():
         else:
             print("Opened camera")
         self.model = create_raft()
+        left_cx = self.get_K(cam='left')[0,2]
+        right_cx = self.get_K(cam='right')[0,2]
+        self.cx_diff = (right_cx-left_cx)/1920
 
     def get_frame(self,depth=True):
         res = sl.Resolution()
         res.width = 1280
         res.height = 720
-        #set runtime params
-        runtime = sl.RuntimeParameters()
-        runtime.texture_confidence_threshold = 100
-        runtime.confidence_threshold = 70
-        if self.cam.grab(runtime) == sl.ERROR_CODE.SUCCESS:
+        if self.cam.grab() == sl.ERROR_CODE.SUCCESS:
             left_rgb = sl.Mat()
             right_rgb = sl.Mat()
             self.cam.retrieve_image(left_rgb, sl.VIEW.LEFT, sl.MEM.CPU, res)
@@ -50,7 +49,7 @@ class Zed():
             if depth:
                 left_torch,right_torch = left.permute(2,0,1),right.permute(2,0,1)
                 flow = raft_inference(left_torch,right_torch,self.model)
-                depth = self.get_K()[0,0]*self.get_stereo_transform()[0,3]/(flow.abs())
+                depth = self.get_K()[0,0]*self.get_stereo_transform()[0,3]/(flow.abs()+self.cx_diff*1280)
             else:
                 depth = None
             return left, right, depth
@@ -60,9 +59,12 @@ class Zed():
         else:
             raise RuntimeError("Could not grab frame")
         
-    def get_K(self):
+    def get_K(self,cam='left'):
         calib = self.cam.get_camera_information().camera_configuration.calibration_parameters
-        intrinsics = calib.left_cam
+        if cam=='left':
+            intrinsics = calib.left_cam
+        else:
+            intrinsics = calib.right_cam
         K = np.array([[intrinsics.fx, 0, intrinsics.cx], [0, intrinsics.fy, intrinsics.cy], [0, 0, 1]])
         return K
     
@@ -90,63 +92,62 @@ def plotly_render(frame):
 
 if __name__ == "__main__":
     import torch
-    zed = Zed(raft_depth=False)
-
-    # input("Press enter to start recording")
-    zed.start_record("/home/justin/lerf/motion_vids/buddha_close_good.svo2")
     from viser import ViserServer
-    # s = ViserServer()
-    import cv2
-    # fig=None
-    while True:
-        left, right, depth = zed.get_frame(depth=False)
-        # if fig is None:
-        #     fig = s.add_gui_plotly(plotly_render(depth))
-        # else:
-        #     fig.figure = plotly_render(depth)
-        cv2.imshow("Left Image", left.cpu().numpy())
-        key = cv2.waitKey(1)
-        if key == ord('q'):
-            break
+    zed = Zed()
 
-    cv2.destroyAllWindows()
+    # zed.start_record("/home/justin/lerf/motion_vids/painter_dab.svo2")
+    # # s = ViserServer()
+    # import cv2
+    # # fig=None
+    # while True:
+    #     left, right, depth = zed.get_frame(depth=False)
+    #     # if fig is None:
+    #     #     fig = s.add_gui_plotly(plotly_render(depth))
+    #     # else:
+    #     #     fig.figure = plotly_render(depth)
+    #     cv2.imshow("Left Image", left.cpu().numpy())
+    #     key = cv2.waitKey(1)
+    #     if key == ord('q'):
+    #         break
+
+    # cv2.destroyAllWindows()
 
 
 
     #code for visualizing poincloud
-    # import viser
-    # import viser.transforms as tf
-    # v = ViserServer()
-    # gui_reset_up = v.add_gui_button(
-    #     "Reset up direction",
-    #     hint="Set the camera control 'up' direction to the current camera's 'up'.",
-    # )
+    import viser
+    import viser.transforms as tf
+    v = ViserServer()
+    gui_reset_up = v.add_gui_button(
+        "Reset up direction",
+        hint="Set the camera control 'up' direction to the current camera's 'up'.",
+    )
 
-    # @gui_reset_up.on_click
-    # def _(event: viser.GuiEvent) -> None:
-    #     client = event.client
-    #     assert client is not None
-    #     client.camera.up_direction = tf.SO3(client.camera.wxyz) @ np.array(
-    #         [0.0, -1.0, 0.0]
-    #     )
-    # while True:
-    #     left,right,depth = zed.get_frame()
-    #     left=left.cpu().numpy()
-    #     depth = depth.cpu().numpy()
-    #     # import matplotlib.pyplot as plt
-    #     # plt.imshow(left)
-    #     # plt.show()
-    #     K = zed.get_K()
-    #     T_world_camera = np.eye(4)
+    @gui_reset_up.on_click
+    def _(event: viser.GuiEvent) -> None:
+        client = event.client
+        assert client is not None
+        client.camera.up_direction = tf.SO3(client.camera.wxyz) @ np.array(
+            [0.0, -1.0, 0.0]
+        )
+    while True:
+        left,right,depth = zed.get_frame()
+        left=left.cpu().numpy()
+        depth = depth.cpu().numpy()
+        # import matplotlib.pyplot as plt
+        # plt.imshow(left)
+        # plt.show()
+        K = zed.get_K()
+        T_world_camera = np.eye(4)
 
-    #     img_wh = left.shape[:2][::-1]
+        img_wh = left.shape[:2][::-1]
 
-    #     grid = (
-    #         np.stack(np.meshgrid(np.arange(img_wh[0]), np.arange(img_wh[1])), 2) + 0.5
-    #     )
+        grid = (
+            np.stack(np.meshgrid(np.arange(img_wh[0]), np.arange(img_wh[1])), 2) + 0.5
+        )
 
-    #     homo_grid = np.concatenate([grid,np.ones((grid.shape[0],grid.shape[1],1))],axis=2).reshape(-1,3)
-    #     local_dirs = np.matmul(np.linalg.inv(K),homo_grid.T).T
-    #     points = (local_dirs * depth.reshape(-1,1)).astype(np.float32)
-    #     points = points.reshape(-1,3)*2
-    #     v.add_point_cloud("points", points = points.reshape(-1,3), colors=left.reshape(-1,3),point_size=.001)
+        homo_grid = np.concatenate([grid,np.ones((grid.shape[0],grid.shape[1],1))],axis=2).reshape(-1,3)
+        local_dirs = np.matmul(np.linalg.inv(K),homo_grid.T).T
+        points = (local_dirs * depth.reshape(-1,1)).astype(np.float32)
+        points = points.reshape(-1,3)*2
+        v.add_point_cloud("points", points = points.reshape(-1,3), colors=left.reshape(-1,3),point_size=.001)

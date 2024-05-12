@@ -215,11 +215,21 @@ dig_method = MethodSpecification(
                 dataparser=NerfstudioDataParserConfig(load_3D_points=True,train_split_fraction=0.99),
             ),
             model=DiGModelConfig(),
-            garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            # garfield_ckpt=Path("outputs/garfield_plushie/garfield/2024-02-29_165759/config.yml")
+            # garfield_ckpt = Path("outputs/articulated_objects/garfield/2024-04-15_222909/config.yml")
+            # garfield_ckpt=Path("outputs/buddha_balls/garfield/2024-04-08_155953/config.yml")
             # garfield_ckpt = Path("outputs/table_scan/garfield/2024-03-21_120025/config.yml")
             # garfield_ckpt = Path("outputs/tissue_scan/garfield/2024-03-21_135147/config.yml")
-            # garfield_ckpt = Path("outputs/boops_mug/garfield/2024-03-18_180854/config.yml")
+            garfield_ckpt = Path("outputs/boops_mug/garfield/2024-03-18_180854/config.yml")
+            # garfield_ckpt = Path("outputs/matt_hand/garfield/2024-05-02_164559/config.yml")
             # garfield_ckpt = Path("outputs/nerfgun2/garfield/2024-03-13_140635/config.yml")
+            # garfield_ckpt = Path("outputs/nerfgun3/garfield/2024-05-03_165745/config.yml")
+            # garfield_ckpt= Path("outputs/boops_poly/garfield/2024-05-05_185442/config.yml")
+            # garfield_ckpt = Path("outputs/nerfgun4/garfield/2024-05-06_100908/config.yml")
+            # garfield_ckpt = Path("outputs/bww_faucet/garfield/2024-05-07_140338/config.yml")
+            # garfield_ckpt = Path("outputs/buddha_balls_poly/garfield/2024-05-08_115907/config.yml")
+            # garfield_ckpt = Path("outputs/painter_sculpture/garfield/2024-05-10_130257/config.yml")
+            # garfield_ckpt = Path("outputs/office_chair/garfield/2024-05-10_150230/config.yml")
         ),
         optimizers={
             "means": {

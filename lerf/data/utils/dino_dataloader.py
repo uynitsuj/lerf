@@ -25,7 +25,6 @@ def get_img_resolution(H, W, max_size = 1260, p=14):
         new_H = max_size
         new_W = (int((W/H)*max_size)//p)*p
     return new_H, new_W
-
 class DinoV2DataLoader(FeatureDataloader):
     model_type = "dinov2_vits14"
 
@@ -181,10 +180,10 @@ class DinoDataloader(FeatureDataloader):
                     ])
         preproc_image_lst = preprocess(image_list).to(self.device)
         dino_embeds = []
-        
+
         for image in tqdm(preproc_image_lst, desc="dino", total=len(image_list), leave=False):
             with torch.no_grad():
-                # DVT              
+                # DVT
                 if self.use_denoiser:
                     # denoiser
                     image=image.unsqueeze(0)
