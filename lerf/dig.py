@@ -15,7 +15,10 @@ from lerf.data.utils.dino_dataloader import get_img_resolution
 from torchvision.transforms.functional import resize
 import tinycudann as tcnn
 import contextlib
+from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
+
 from collections import OrderedDict
+import torch
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
@@ -29,6 +32,7 @@ class DiGModelConfig(SplatfactoModelConfig):
     num_downscales: int = 0
     gaussian_dim:int = 48
     """Dimension the gaussians actually store as features"""
+    camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="SO3xR3"))
 
 class DiGModel(SplatfactoModel):
     config: DiGModelConfig
@@ -41,16 +45,15 @@ class DiGModel(SplatfactoModel):
         self.click_gaussian = ViewerButton(name="Click Gaussian", cb_hook=self._click_gaussian)
         self.click_location = None
         self.click_handle = None
-        self.nn = tcnn.Network(
-            n_input_dims=self.config.gaussian_dim,
-            n_output_dims=self.config.dim,
-            network_config={
-                "otype": "FullyFusedMLP",
-                "activation": "ReLU",
-                "output_activation": "None",
-                "n_neurons": 64,
-                "n_hidden_layers": 2,
-            },
+        #convert to torch
+        self.nn = torch.nn.Sequential(
+            torch.nn.Linear(self.config.gaussian_dim, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, 64, bias = False),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, self.config.dim, bias = False)
         )
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         super().load_state_dict(dict, **kwargs)
@@ -136,6 +139,7 @@ class DiGModel(SplatfactoModel):
         assert camera.shape[0] == 1, "Only one camera at a time"
 
         # get the background color
+        optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)[0, ...]
         if self.training:
             if self.config.background_color == "random":
                 background = torch.rand(3, device=self.device)
@@ -163,8 +167,8 @@ class DiGModel(SplatfactoModel):
         camera_downscale = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_downscale)
         # shift the camera to center of scene looking at center
-        R = camera.camera_to_worlds[0, :3, :3]  # 3 x 3
-        T = camera.camera_to_worlds[0, :3, 3:4]  # 3 x 1
+        R = optimized_camera_to_world[:3, :3]  # 3 x 3
+        T = optimized_camera_to_world[:3, 3:4]  # 3 x 1
         # flip the z and y axes to align with gsplat conventions
         R_edit = torch.diag(torch.tensor([1, -1, -1], device=self.device, dtype=R.dtype))
         R = R @ R_edit
@@ -307,11 +311,11 @@ class DiGModel(SplatfactoModel):
                 background=torch.zeros(self.config.gaussian_dim, device=self.device),
                 return_alpha=True,
             )  # type: ignore
-        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
+        cutoff = 0.0 if self.training else 0.8
+        dino_feats = torch.where(dino_alpha[...,None] > cutoff, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
         nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
-        dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
-        if not self.training:
-            dino_feats[dino_alpha < 0.8] = 0
+        # dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
+        dino_feats = self.nn(nn_inputs).view(dino_h,dino_w,-1)
         depth_im = None
         if self.config.output_depth_during_training or not self.training:
             depth_im = rasterize_gaussians(  # type: ignore
