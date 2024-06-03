@@ -139,7 +139,7 @@ class DiGModel(SplatfactoModel):
         assert camera.shape[0] == 1, "Only one camera at a time"
 
         # get the background color
-        optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)[0, ...]
+        optimized_camera_to_world = camera.camera_to_worlds[0]#self.camera_optimizer.apply_to_camera(camera)[0, ...]
         if self.training:
             if self.config.background_color == "random":
                 background = torch.rand(3, device=self.device)
@@ -311,11 +311,12 @@ class DiGModel(SplatfactoModel):
                 background=torch.zeros(self.config.gaussian_dim, device=self.device),
                 return_alpha=True,
             )  # type: ignore
-        cutoff = 0.0 if self.training else 0.8
-        dino_feats = torch.where(dino_alpha[...,None] > cutoff, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
+        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
         nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
         # dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
         dino_feats = self.nn(nn_inputs).view(dino_h,dino_w,-1)
+        if not self.training:
+            dino_feats[dino_alpha < 0.8] = 0
         depth_im = None
         if self.config.output_depth_during_training or not self.training:
             depth_im = rasterize_gaussians(  # type: ignore
