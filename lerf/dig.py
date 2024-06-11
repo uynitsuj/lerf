@@ -2,12 +2,13 @@ from dataclasses import field
 from typing import Dict, List, Type,Literal
 
 from torch.nn import Parameter
-from gsplat.sh import spherical_harmonics
+# from gsplat.sh import spherical_harmonics
 
 from nerfstudio.viewer.viewer_elements import *
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
-from gsplat.project_gaussians import project_gaussians
-from gsplat.rasterize import rasterize_gaussians
+# from gsplat.project_gaussians import project_gaussians
+# from gsplat.rasterize import rasterize_gaussians
+from gsplat.rendering import rasterization
 import math
 from nerfstudio.model_components import renderers
 from nerfstudio.viewer.viewer_elements import *
@@ -19,18 +20,20 @@ from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimize
 
 from collections import OrderedDict
 import torch
+from nerfstudio.models.splatfacto import get_viewmat
+import torch.nn.functional as F
 @dataclass
 class DiGModelConfig(SplatfactoModelConfig):
     _target: Type = field(default_factory=lambda: DiGModel)
     dim: int = 64
     """Output dimension of the feature rendering"""
     rasterize_mode: Literal["classic", "antialiased"] = "antialiased"
-    dino_rescale_factor: int = 3
+    dino_rescale_factor: int = 5
     """
     How much to upscale rendered dino for supervision
     """
     num_downscales: int = 0
-    gaussian_dim:int = 48
+    gaussian_dim:int = 32
     """Dimension the gaussians actually store as features"""
     camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="SO3xR3"))
 
@@ -122,7 +125,7 @@ class DiGModel(SplatfactoModel):
         gps = super().get_param_groups()
         gps['nn_projection'] = list(self.nn.parameters())
         return gps
-    
+
     def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
@@ -136,11 +139,14 @@ class DiGModel(SplatfactoModel):
         if not isinstance(camera, Cameras):
             print("Called get_outputs with not a camera")
             return {}
-        assert camera.shape[0] == 1, "Only one camera at a time"
+
+        optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)[0, ...]
 
         # get the background color
-        optimized_camera_to_world = camera.camera_to_worlds[0]#self.camera_optimizer.apply_to_camera(camera)[0, ...]
         if self.training:
+            assert camera.shape[0] == 1, "Only one camera at a time"
+            optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)
+
             if self.config.background_color == "random":
                 background = torch.rand(3, device=self.device)
             elif self.config.background_color == "white":
@@ -150,6 +156,8 @@ class DiGModel(SplatfactoModel):
             else:
                 background = self.background_color.to(self.device)
         else:
+            optimized_camera_to_world = camera.camera_to_worlds
+
             if renderers.BACKGROUND_COLOR_OVERRIDE is not None:
                 background = renderers.BACKGROUND_COLOR_OVERRIDE.to(self.device)
             else:
@@ -158,30 +166,12 @@ class DiGModel(SplatfactoModel):
         if self.crop_box is not None and not self.training:
             crop_ids = self.crop_box.within(self.means).squeeze()
             if crop_ids.sum() == 0:
-                rgb = background.repeat(int(camera.height.item()), int(camera.width.item()), 1)
-                depth = background.new_ones(*rgb.shape[:2], 1) * 10
-                accumulation = background.new_zeros(*rgb.shape[:2], 1)
-                return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
+                return self.get_empty_outputs(int(camera.width.item()), int(camera.height.item()), background)
         else:
             crop_ids = None
-        camera_downscale = self._get_downscale_factor()
-        camera.rescale_output_resolution(1 / camera_downscale)
-        # shift the camera to center of scene looking at center
-        R = optimized_camera_to_world[:3, :3]  # 3 x 3
-        T = optimized_camera_to_world[:3, 3:4]  # 3 x 1
-        # flip the z and y axes to align with gsplat conventions
-        R_edit = torch.diag(torch.tensor([1, -1, -1], device=self.device, dtype=R.dtype))
-        R = R @ R_edit
-        # analytic matrix inverse to get world2camera matrix
-        R_inv = R.T
-        T_inv = -R_inv @ T
-        viewmat = torch.eye(4, device=R.device, dtype=R.dtype)
-        viewmat[:3, :3] = R_inv
-        viewmat[:3, 3:4] = T_inv
-        # calculate the FOV of the camera given fx and fy, width and height
-        cx = camera.cx.item()
-        cy = camera.cy.item()
-        W, H = int(camera.width.item()), int(camera.height.item())
+        camera_scale_fac = 1.0 / self._get_downscale_factor()
+        viewmat = get_viewmat(optimized_camera_to_world)
+        W, H = int(camera.width[0] * camera_scale_fac), int(camera.height[0] * camera_scale_fac)
         self.last_size = (H, W)
 
         if crop_ids is not None:
@@ -191,6 +181,7 @@ class DiGModel(SplatfactoModel):
             features_rest_crop = self.features_rest[crop_ids]
             scales_crop = self.scales[crop_ids]
             quats_crop = self.quats[crop_ids]
+            dino_crop = self.gauss_params['dino_feats'][crop_ids]
         else:
             opacities_crop = self.opacities
             means_crop = self.means
@@ -198,148 +189,101 @@ class DiGModel(SplatfactoModel):
             features_rest_crop = self.features_rest
             scales_crop = self.scales
             quats_crop = self.quats
+            dino_crop = self.gauss_params['dino_feats']
 
         colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
-        BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
-        self.xys, depths, self.radii, conics, comp, num_tiles_hit, cov3d = project_gaussians(  # type: ignore
-            means_crop,
-            torch.exp(scales_crop),
-            1,
-            quats_crop / quats_crop.norm(dim=-1, keepdim=True),
-            viewmat.squeeze()[:3, :],
-            camera.fx.item(),
-            camera.fy.item(),
-            cx,
-            cy,
-            H,
-            W,
-            BLOCK_WIDTH,
-        )  # type: ignore
-
-        # rescale the camera back to original dimensions before returning
-        camera.rescale_output_resolution(camera_downscale)
-
-        if (self.radii).sum() == 0:
-            rgb = background.repeat(H, W, 1)
-            depth = background.new_ones(*rgb.shape[:2], 1) * 10
-            accumulation = background.new_zeros(*rgb.shape[:2], 1)
-
-            return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
-
-        # Important to allow xys grads to populate properly
-        if self.training and self.xys.requires_grad:
-            self.xys.retain_grad()
-
-        if self.config.sh_degree > 0:
-            viewdirs = means_crop.detach() - camera.camera_to_worlds.detach()[..., :3, 3]  # (N, 3)
-            viewdirs = viewdirs / viewdirs.norm(dim=-1, keepdim=True)
-            n = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
-            rgbs = spherical_harmonics(n, viewdirs, colors_crop)
-            rgbs = torch.clamp(rgbs + 0.5, min=0.0)  # type: ignore
-        else:
-            rgbs = torch.sigmoid(colors_crop[:, 0, :])
-
-        assert (num_tiles_hit > 0).any()  # type: ignore
-
+        K = camera.get_intrinsics_matrices().cuda()
+        K[:, :2, :] *= camera_scale_fac
         # apply the compensation of screen space blurring to gaussians
-        opacities = None
-        if self.config.rasterize_mode == "antialiased":
-            opacities = torch.sigmoid(opacities_crop) * comp[:, None]
-        elif self.config.rasterize_mode == "classic":
-            opacities = torch.sigmoid(opacities_crop)
-        else:
+        if self.config.rasterize_mode not in ["antialiased", "classic"]:
             raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
 
-        rgb, alpha = rasterize_gaussians(  # type: ignore
-            self.xys,
-            depths,
-            self.radii,
-            conics,
-            num_tiles_hit,  # type: ignore
-            rgbs,
-            opacities,
-            H,
-            W,
-            BLOCK_WIDTH,
-            background=background,
-            return_alpha=True,
-        )  # type: ignore
-        alpha = alpha[..., None]
-        rgb = torch.clamp(rgb, max=1.0)  # type: ignore
-        
-        dino_feats = None
-        DINO_BLOCK = 14
+        if self.config.output_depth_during_training or not self.training:
+            render_mode = "RGB+ED"
+        else:
+            render_mode = "RGB"
+
+        if self.config.sh_degree > 0:
+            sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
+        else:
+            sh_degree_to_use = None
+
+        render, alpha, info = rasterization(
+            means=means_crop,
+            quats=F.normalize(quats_crop,dim=1),
+            scales=torch.exp(scales_crop),
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),
+            colors=colors_crop,
+            viewmats=viewmat,  # [1, 4, 4]
+            Ks=K,  # [1, 3, 3]
+            width=W,
+            height=H,
+            packed=False,
+            near_plane=0.01,
+            far_plane=1e10,
+            render_mode=render_mode,
+            sh_degree=sh_degree_to_use,
+            sparse_grad=False,
+            absgrad=True,
+            rasterize_mode=self.config.rasterize_mode,
+            # set some threshold to disregrad small gaussians for faster rendering.
+            # radius_clip=3.0,
+        )
+        if self.training and info["means2d"].requires_grad:
+            info["means2d"].retain_grad()
+        self.xys = info["means2d"]  # [1, N, 2]
+        self.radii = info["radii"][0]  # [N]
+
+        alpha = alpha[:, ...]
+        rgb = render[:, ..., :3] + (1 - alpha) * background
+        rgb = torch.clamp(rgb, 0.0, 1.0)
+        if render_mode == "RGB+ED":
+            depth_im = render[:, ..., 3:4]
+            depth_im = torch.where(alpha > 0, depth_im, 1000).squeeze(0)
+        else:
+            depth_im = None
+
+        # Insert DINO stuff
         p_size = 14
         downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1260/max(H,W))/p_size
+        dino_K = K.clone()
+        dino_K[:, :2, :] *= downscale
         h,w = get_img_resolution(H, W)
         if self.training:
             dino_h,dino_w = self.config.dino_rescale_factor*(h//p_size),self.config.dino_rescale_factor*(w//p_size)
         else:
             dino_h,dino_w = H,W
-        grad_ctx = torch.no_grad if self.training else contextlib.nullcontext
-        # turn on gradients for this in eval() mode for pose optimization
-        with grad_ctx():
-            dino_xys, dino_depths, dino_radii, dino_conics, _, dino_num_tiles_hit, _ = project_gaussians(  # type: ignore
-                means_crop,
-                torch.exp(scales_crop),
-                1,
-                quats_crop / quats_crop.norm(dim=-1, keepdim=True),
-                viewmat.squeeze()[:3, :],
-                camera.fx.item()*downscale,
-                camera.fy.item()*downscale,
-                cx*downscale,
-                cy*downscale,
-                dino_h,
-                dino_w,
-                DINO_BLOCK,
-            )  # type: ignore
-        if crop_ids is not None:
-            gauss_crops = self.gauss_params['dino_feats'][crop_ids]
-        else:
-            gauss_crops = self.gauss_params['dino_feats']
-        dino_feats,dino_alpha = rasterize_gaussians(  # type: ignore
-                dino_xys,
-                dino_depths,
-                dino_radii,
-                dino_conics,
-                dino_num_tiles_hit,  # type: ignore
-                gauss_crops,
-                opacities.detach(),
-                dino_h,
-                dino_w,
-                DINO_BLOCK,
-                background=torch.zeros(self.config.gaussian_dim, device=self.device),
-                return_alpha=True,
-            )  # type: ignore
-        dino_feats = torch.where(dino_alpha[...,None] > 0, dino_feats / (dino_alpha[...,None].detach()), torch.zeros(self.config.gaussian_dim, device=self.device))
+        dino_feats, dino_alpha, _ = rasterization(
+            means=means_crop.detach() if self.training else means_crop,
+            quats=F.normalize(quats_crop,dim=1).detach(),
+            scales=torch.exp(scales_crop).detach(),
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1).detach(),
+            colors=dino_crop,
+            viewmats=viewmat,  # [1, 4, 4]
+            Ks=dino_K,  # [1, 3, 3]
+            width=dino_w,
+            height=dino_h,
+            packed=False,
+            near_plane=0.01,
+            far_plane=1e10,
+            render_mode="RGB",
+            sparse_grad=False,
+            absgrad=False,
+            rasterize_mode=self.config.rasterize_mode,
+        )
+        feat_shape = dino_feats.shape
+
+        dino_feats = torch.where(dino_alpha > 0, dino_feats / dino_alpha.detach(), torch.zeros(self.config.gaussian_dim, device=self.device))
         nn_inputs = dino_feats.view(-1,self.config.gaussian_dim)
-        # dino_feats = self.nn(nn_inputs.half()).float().view(dino_h,dino_w,-1)
-        dino_feats = self.nn(nn_inputs).view(dino_h,dino_w,-1)
+        dino_feats = self.nn(nn_inputs).view(*feat_shape[:-1],-1)
         if not self.training:
-            dino_feats[dino_alpha < 0.8] = 0
-        depth_im = None
-        if self.config.output_depth_during_training or not self.training:
-            depth_im = rasterize_gaussians(  # type: ignore
-                self.xys,
-                depths,
-                self.radii,
-                conics,
-                num_tiles_hit,  # type: ignore
-                depths[:, None].repeat(1, 3),
-                opacities,
-                H,
-                W,
-                BLOCK_WIDTH,
-                background=torch.zeros(3, device=self.device),
-            )[..., 0:1]  # type: ignore
-            depth_im = torch.where(alpha > 0, depth_im / alpha, depth_im.detach().max())
-        
-        out = {"rgb": rgb, "depth": depth_im, "accumulation": alpha, "background": background,'dino':dino_feats,'dino_alpha':dino_alpha[..., None]}
+            dino_feats[dino_alpha.squeeze(-1) < 0.8] = 0
+        out = {"rgb": rgb.squeeze(0), "depth": depth_im, "accumulation": alpha.squeeze(0), "background": background, "dino":dino_feats.squeeze(0),'dino_alpha':dino_alpha.squeeze(0)}  # type: ignore
         if hasattr(self,'click_feat') and not self.training and dino_feats is not None:
             #compute similarity to click_feat across dino feats
-            sim = (dino_feats - self.click_feat).pow(2).sum(dim=-1).sqrt()[...,None]
+            sim = (dino_feats.squeeze(0) - self.click_feat).pow(2).sum(dim=-1).sqrt()[...,None]
             out['click_similarity'] = sim
-        return out   # type: ignore
+        return out 
     
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
