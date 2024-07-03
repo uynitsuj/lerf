@@ -50,7 +50,7 @@ class LERFDataManagerConfig(VanillaDataManagerConfig):
 @dataclass
 class DiGDataManagerConfig(FullImageDatamanagerConfig):
     _target: Type = field(default_factory=lambda: DiGDataManager)
-    use_denoiser:bool = True
+    use_denoiser:bool = False
     
 class DiGDataManager(FullImageDatamanager):
     def __init__(self,*args,**kwargs):

@@ -16,7 +16,7 @@ parent_dir_path = os.path.abspath(os.path.join(__file__, '../../../../Denoising-
 if parent_dir_path not in sys.path:
     sys.path.append(parent_dir_path)
 import DenoisingViT
-#usually 840 max size
+#usually 1260 max size
 def get_img_resolution(H, W, max_size = 1260, p=14):
     if H<W:
         new_W = max_size
@@ -196,13 +196,14 @@ class DinoDataloader(FeatureDataloader):
                         dino_embeds.append(denoised_features.cpu().detach())
                     
                 else:
-                    descriptors = self.extractor.extract_descriptors(
-                    image.unsqueeze(0),
-                    [self.dino_layer],
-                    self.dino_facet,
-                    self.dino_bin, 
-                    )             
-                    descriptors = descriptors.reshape(self.extractor.num_patches[0], self.extractor.num_patches[1], -1)
+                    descriptors = self.extractor.model.get_intermediate_layers(image.unsqueeze(0),reshape=True)[0].squeeze().permute(1,2,0)/10
+                    # descriptors = self.extractor.extract_descriptors(
+                    #     image.unsqueeze(0),
+                    #     [self.dino_layer],
+                    #     self.dino_facet,
+                    #     self.dino_bin, 
+                    #     )             
+                    # descriptors = descriptors.reshape(self.extractor.num_patches[0], self.extractor.num_patches[1], -1)
                     if keep_cuda:
                         dino_embeds.append(descriptors)
                     else:
