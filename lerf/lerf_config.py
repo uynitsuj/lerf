@@ -274,9 +274,9 @@ dig_method = MethodSpecification(
                 ),
             },
             "camera_opt": {
-            "optimizer": AdamOptimizerConfig(lr=5e-5, eps=1e-15),
+            "optimizer": AdamOptimizerConfig(lr=1e-4, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(
-                lr_final=5e-7, max_steps=5000, warmup_steps=1000, lr_pre_warmup=0
+                lr_final=5e-6, max_steps=6000, warmup_steps=700
             ),
         },
         },

@@ -33,7 +33,7 @@ class DiGModelConfig(SplatfactoModelConfig):
     How much to upscale rendered dino for supervision
     """
     num_downscales: int = 0
-    gaussian_dim:int = 32
+    gaussian_dim:int = 64
     """Dimension the gaussians actually store as features"""
     camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="SO3xR3"))
 
@@ -245,7 +245,7 @@ class DiGModel(SplatfactoModel):
 
         # Insert DINO stuff
         p_size = 14
-        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1260/max(H,W))/p_size
+        downscale = 1.0 if not self.training else (self.config.dino_rescale_factor*1050/max(H,W))/p_size
         dino_K = K.clone()
         dino_K[:, :2, :] *= downscale
         h,w = get_img_resolution(H, W)
