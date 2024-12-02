@@ -15,7 +15,7 @@ from torch_kmeans import KMeans, CosineSimilarity
 parent_dir_path = os.path.abspath(os.path.join(__file__, '../../../../Denoising-ViT'))
 if parent_dir_path not in sys.path:
     sys.path.append(parent_dir_path)
-import DenoisingViT
+# import DenoisingViT
 #usually 1260 max size
 def get_img_resolution(H, W, max_size = 1050, p=14):
     if H<W:
@@ -107,40 +107,40 @@ class DinoDataloader(FeatureDataloader):
         self.extractor = ViTExtractor(self.dino_model_type, self.dino_stride)
         self.use_denoiser = use_denoiser
         self.device = device
-        if self.use_denoiser:
-            #arg
-            vit_type = "vit_base_patch14_dinov2.lvd142m"
-            vit_stride = self.dino_stride
-            noise_map_height = 37
-            noise_map_width = 37
-            enable_pe = False
-            load_denoiser_from = parent_dir_path + '/better_DVT/denoiser_layernorm.pth'
+        # if self.use_denoiser:
+        #     #arg
+        #     vit_type = "vit_base_patch14_dinov2.lvd142m"
+        #     vit_stride = self.dino_stride
+        #     noise_map_height = 37
+        #     noise_map_width = 37
+        #     enable_pe = False
+        #     load_denoiser_from = parent_dir_path + '/better_DVT/denoiser_layernorm.pth'
 
             
-            #load denoiser model
-            vit = DenoisingViT.ViTWrapper(
-            model_type=vit_type,
-                stride=vit_stride,)
-            vit = vit.to(self.device)
-            self.denoise_model = DenoisingViT.Denoiser(
-                noise_map_height=noise_map_height,
-                noise_map_width=noise_map_width,
-                feature_dim=vit.n_output_dims,
-                vit=vit,
-                enable_pe=enable_pe,
-            ).to(self.device)
-            if load_denoiser_from is not None:
-                freevit_model_ckpt = torch.load(load_denoiser_from)["denoiser"]
-                #modify the key to remove the trailing .0
-                freevit_model_ckpt = {key.replace('.0', '') if '.0' in key else key: value for key, value in freevit_model_ckpt.items()}
-                msg = self.denoise_model.load_state_dict(freevit_model_ckpt, strict=False)
-            for k in self.denoise_model.state_dict().keys():
-                if k in freevit_model_ckpt:
-                    print(k, "loaded")
-            for p in self.denoise_model.parameters():
-                p.requires_grad = False
-            self.denoise_model.eval()
-            self.denoise_model.to(device)
+        #     #load denoiser model
+        #     vit = DenoisingViT.ViTWrapper(
+        #     model_type=vit_type,
+        #         stride=vit_stride,)
+        #     vit = vit.to(self.device)
+        #     self.denoise_model = DenoisingViT.Denoiser(
+        #         noise_map_height=noise_map_height,
+        #         noise_map_width=noise_map_width,
+        #         feature_dim=vit.n_output_dims,
+        #         vit=vit,
+        #         enable_pe=enable_pe,
+        #     ).to(self.device)
+        #     if load_denoiser_from is not None:
+        #         freevit_model_ckpt = torch.load(load_denoiser_from)["denoiser"]
+        #         #modify the key to remove the trailing .0
+        #         freevit_model_ckpt = {key.replace('.0', '') if '.0' in key else key: value for key, value in freevit_model_ckpt.items()}
+        #         msg = self.denoise_model.load_state_dict(freevit_model_ckpt, strict=False)
+        #     for k in self.denoise_model.state_dict().keys():
+        #         if k in freevit_model_ckpt:
+        #             print(k, "loaded")
+        #     for p in self.denoise_model.parameters():
+        #         p.requires_grad = False
+        #     self.denoise_model.eval()
+        #     self.denoise_model.to(device)
         self.pca_dim = pca_dim
         super().__init__(cfg, device, image_list, cache_path)
         print("Dino data shape", self.data.shape)
