@@ -208,7 +208,7 @@ class DiGModel(SplatfactoModel):
         else:
             sh_degree_to_use = None
 
-        render, alpha, info = rasterization(
+        render, alpha, self.info = rasterization(
             means=means_crop,
             quats=F.normalize(quats_crop,dim=1),
             scales=torch.exp(scales_crop),
@@ -229,14 +229,20 @@ class DiGModel(SplatfactoModel):
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
         )
-        if self.training and info["means2d"].requires_grad:
-            info["means2d"].retain_grad()
-        self.xys = info["means2d"]  # [1, N, 2]
-        self.radii = info["radii"][0]  # [N]
+        # if self.training and info["means2d"].requires_grad:
+        #     info["means2d"].retain_grad()
+        # self.xys = info["means2d"]  # [1, N, 2]
+        # self.radii = info["radii"][0]  # [N]
 
         alpha = alpha[:, ...]
         rgb = render[:, ..., :3] + (1 - alpha) * background
         rgb = torch.clamp(rgb, 0.0, 1.0)
+        
+        # apply bilateral grid
+        if self.config.use_bilateral_grid and self.training:
+            if camera.metadata is not None and "cam_idx" in camera.metadata:
+                rgb = self._apply_bilateral_grid(rgb, camera.metadata["cam_idx"], H, W)
+                
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., 3:4]
             depth_im = torch.where(alpha > 0, depth_im, 1000).squeeze(0)
